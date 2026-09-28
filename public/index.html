@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>LinkHub</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="48x48 32x32 16x16">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+
+<!-- icon sprite -->
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.7.9l.8 1.2H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14.5 6.5 17.5 9.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/><path d="M6.5 7 7.4 19a1.6 1.6 0 0 0 1.6 1.5h6a1.6 1.6 0 0 0 1.6-1.5L17.5 7"/><path d="M10.5 11v6M13.5 11v6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M15.5 12v2.2"/></symbol>
+  <symbol id="i-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.3" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 13.5h4l1.5 3h6l1.5-3h4"/><path d="M5.5 5.5h13l2 8v3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-3z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <div class="brand-mark"><svg width="18" height="18"><use href="#i-folder"/></svg></div>
+      <div>
+        <div class="brand-name">LinkHub</div>
+        <div class="brand-tag">Company links, all in one place</div>
+      </div>
+    </div>
+
+    <div class="search">
+      <span class="s-ico"><svg width="15" height="15"><use href="#i-search"/></svg></span>
+      <label class="sr" for="q">Search links</label>
+      <input id="q" type="search" placeholder="Search links..." autocomplete="off" spellcheck="false">
+    </div>
+
+    <div id="profileChip" class="profile-slot"></div>
+
+      <div class="view-controls">
+        <button class="seg" id="btnViewGrid" title="Grid view" aria-label="Grid view"><svg width="15" height="15"><use href="#i-grid"/></svg></button>
+        <button class="seg" id="btnViewList" title="List view" aria-label="List view"><svg width="15" height="15"><use href="#i-list"/></svg></button>
+        <button class="seg sep" id="btnUnsorted" title="Show or hide Unsorted" aria-label="Show or hide Unsorted"><svg width="15" height="15"><use href="#i-inbox"/></svg></button>
+      </div>
+    <div class="topbar-actions">
+      <button class="btn" id="btnAddSection"><svg width="14" height="14"><use href="#i-folder"/></svg> New section</button>
+      <button class="btn btn-primary" id="btnAddLink"><svg width="14" height="14"><use href="#i-plus"/></svg> Add link</button>
+      <div class="catalog-wrap">
+        <button class="btn" id="btnCatalog" aria-expanded="false" aria-haspopup="true">All links <svg width="12" height="12"><use href="#i-caret"/></svg></button>
+        <div class="catalog-panel" id="catalogPanel" hidden></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="board"><div class="state">Loading&hellip;</div></div>
+
+  <div class="footnote">
+    <span>Drag a tile and it slots in where you drop it &mdash; including into another section.</span>
+    <span>Press <b>/</b> to search.</span>
+    __SIGN_OUT__
+  </div>
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div id="modalHost"></div>
+
+<script>
+  window.LH_DELETE_WORD = __DELETE_WORD__;
+</script>
+<script src="assets/app.js"></script>
+</body>
+</html>

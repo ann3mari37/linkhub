@@ -1,0 +1,21 @@
+{
+  "name": "linkhub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Company links, all in one place: one shared link catalog, with sections and layout per profile.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --env-file=.env --watch server.js",
+    "import": "node --env-file-if-exists=.env src/import.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "connect-pg-simple": "^10.0.0",
+    "express": "^5.1.0",
+    "express-session": "^1.18.1",
+    "pg": "^8.13.1"
+  }
+}

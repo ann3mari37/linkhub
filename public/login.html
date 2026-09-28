@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Sign in - LinkHub</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="48x48 32x32 16x16">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .login-wrap{ min-height:100%; display:flex; align-items:center; justify-content:center; padding:24px 16px; }
+  .login{ width:100%; max-width:360px; background:var(--panel); border:1px solid var(--border);
+          border-radius:var(--radius); box-shadow:var(--shadow); padding:26px 24px 24px; }
+  .login .brand{ margin-bottom:22px; }
+  .login .btn{ width:100%; justify-content:center; margin-top:4px; }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login" id="f" autocomplete="on">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.7.9l.8 1.2H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">LinkHub</div>
+        <div class="brand-tag">Company links, all in one place</div>
+      </div>
+    </div>
+    <div class="errbar" id="err"></div>
+    <div class="field">
+      <label for="pw">Team password</label>
+      <input class="input" id="pw" name="password" type="password" autocomplete="current-password" required autofocus>
+    </div>
+    <button class="btn btn-primary" id="go" type="submit">Sign in</button>
+  </form>
+</div>
+<script>
+  document.getElementById("f").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var go = document.getElementById("go"), err = document.getElementById("err");
+    go.disabled = true;
+    err.classList.remove("show");
+    fetch("login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+      body: "password=" + encodeURIComponent(document.getElementById("pw").value)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.ok) { location.href = "./"; return; }
+        throw new Error(j.error || "Could not sign in.");
+      })
+      .catch(function (e2) {
+        err.textContent = e2.message;
+        err.classList.add("show");
+        go.disabled = false;
+      });
+  });
+</script>
+</body>
+</html>
