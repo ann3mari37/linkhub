@@ -134,13 +134,15 @@ function parseIconLinks(html, pageUrl) {
     const isIcon = rel.includes('icon');
     const isApple = rel.includes('apple-touch-icon') || rel.includes('apple-touch-icon-precomposed');
     if ((!isIcon && !isApple) || !attrs.href) continue;
-    let href;
-    try {
-      href = new URL(decodeEntities(attrs.href.trim()), base).toString();
-    } catch {
-      continue;
+    let href = decodeEntities(attrs.href.trim());
+    // an icon embedded in the page is used as-is; anything else is made absolute
+    if (!/^data:/i.test(href)) {
+      try {
+        href = new URL(href, base).toString();
+      } catch {
+        continue;
+      }
     }
-    if (href.startsWith('data:')) continue;
     const size = parseInt((attrs.sizes || '').split(/[x\s]/i)[0], 10) || 0;
     const type = (attrs.type || '').toLowerCase();
     let score = isIcon ? 100 : 50;
@@ -150,6 +152,22 @@ function parseIconLinks(html, pageUrl) {
     found.push({ href, score });
   }
   return found.sort((a, b) => b.score - a.score).map((f) => f.href);
+}
+
+// Icons embedded in the page as data: URIs. Kept only if the bytes really are an
+// image and small enough to store on the link and send with every page load.
+const MAX_DATA_ICON = 64 * 1024;
+function dataIcon(uri) {
+  if (uri.length > MAX_DATA_ICON) return '';
+  const m = uri.match(/^data:(image\/[a-z0-9.+-]+)?[^,]*?(;base64)?,(.*)$/is);
+  if (!m || !m[1]) return '';
+  let buf;
+  try {
+    buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
+  } catch {
+    return '';
+  }
+  return isImage(buf) ? uri : '';
 }
 
 async function findIcon(rawUrl) {
@@ -171,6 +189,11 @@ async function findIcon(rawUrl) {
   candidates.push(new URL('/favicon.ico', url).toString());
 
   for (const href of [...new Set(candidates)]) {
+    if (/^data:/i.test(href)) {
+      const icon = dataIcon(href);
+      if (icon) return icon;
+      continue;
+    }
     try {
       const r = await safeFetch(href, { maxBytes: 300 * 1024, accept: 'image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8' });
       if (isImage(r.buf)) return r.url;

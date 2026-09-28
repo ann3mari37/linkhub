@@ -43,9 +43,11 @@ const cleanThumbData = (v) => {
   const s = String(v || '');
   return /^data:image\/[a-z0-9.+-]+[;,]/i.test(s) && s.length <= 200 * 1024 ? s : '';
 };
+// the icon lookup's answer: a URL, or an icon the site embeds in its page as a data URI
 const cleanThumbUrl = (v) => {
-  const s = text(v, 1000);
-  return /^https?:\/\//i.test(s) ? s : '';
+  const s = String(v || '').trim();
+  if (/^data:image\/[a-z0-9.+-]+[;,]/i.test(s)) return s.length <= 64 * 1024 ? s : '';
+  return /^https?:\/\//i.test(s) && s.length <= 1000 ? s : '';
 };
 
 const iso = (d) => (d ? new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z') : '');

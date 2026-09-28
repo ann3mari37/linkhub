@@ -216,7 +216,7 @@
   /* Bump FAV_VERSION whenever the resolution logic changes. Entries written by
      an older version are ignored, so a fix is never masked by a stale "this
      host has no icon" answer cached before the fix existed. */
-  var FAV_VERSION  = 10;  /* bumped: sign-in hosts on the same domain are now caught */
+  var FAV_VERSION  = 11;  /* bumped: icons embedded in the page (data: URIs) are now found */
   var FAV_TTL_HIT  = 7 * 24 * 60 * 60 * 1000;   /* a found icon rarely moves */
   var FAV_TTL_MISS = 6 * 60 * 60 * 1000;        /* a miss is worth retrying sooner */
   var FAV = {};
