@@ -6,44 +6,20 @@ const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 const { pool, migrate } = require('./src/db');
 const { router: api, DELETE_WORD } = require('./src/api');
-const { importOnStart } = require('./src/import');
+const { router: admin, adminEnabled } = require('./src/admin');
+const guard = require('./src/guard');
 
 const PORT = Number(process.env.PORT || 3000);
 const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.RAILWAY_ENVIRONMENT);
 const PUBLIC = path.join(__dirname, 'public');
 
-// One shared team password. Without it the page is open to anyone who finds the URL.
-const APP_PASSWORD = process.env.APP_PASSWORD || '';
-if (!APP_PASSWORD) {
-  console.warn('APP_PASSWORD is not set - anyone with the URL can view and change every link.');
-}
+if (!adminEnabled) console.warn('ADMIN_PASSWORD is not set - the admin page (creating families) is switched off.');
 
-function passwordMatches(given) {
-  const a = crypto.createHash('sha256').update(String(given || '')).digest();
-  const b = crypto.createHash('sha256').update(APP_PASSWORD).digest();
-  return crypto.timingSafeEqual(a, b);
-}
-
-// Slow down password guessing: 10 wrong tries per address per 15 minutes.
-const FAIL_WINDOW = 15 * 60 * 1000;
-const failures = new Map();
-function tooManyFailures(ip) {
-  const f = failures.get(ip);
-  if (!f || Date.now() - f.first > FAIL_WINDOW) return false;
-  return f.count >= 10;
-}
-function recordFailure(ip) {
-  if (failures.size > 1000) {
-    for (const [k, v] of failures) if (Date.now() - v.first > FAIL_WINDOW) failures.delete(k);
-  }
-  const f = failures.get(ip);
-  if (!f || Date.now() - f.first > FAIL_WINDOW) failures.set(ip, { first: Date.now(), count: 1 });
-  else f.count++;
-}
+const esc = (s) =>
+  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 async function main() {
   await migrate();
-  await importOnStart();
 
   const app = express();
   app.set('trust proxy', 1);
@@ -87,53 +63,72 @@ async function main() {
     })
   );
 
-  /* ---- sign in ---- */
+  /* ---- family sign in: the family username is the whole sign-in ---- */
 
-  const signedIn = (req) => !APP_PASSWORD || req.session.ok === true;
-
-  app.post('/login', (req, res) => {
-    if (tooManyFailures(req.ip)) {
-      return res.status(429).json({ ok: false, error: 'Too many wrong tries. Wait 15 minutes and try again.' });
+  app.post('/login', async (req, res) => {
+    if (guard.blocked('family', req.ip)) return res.status(429).json({ ok: false, error: guard.TOO_MANY });
+    const username = String((req.body || {}).username || '').trim().toLowerCase();
+    const { rows } = username
+      ? await pool.query('SELECT id FROM families WHERE lower(username) = $1', [username])
+      : { rows: [] };
+    if (!rows[0]) {
+      guard.recordFailure('family', req.ip);
+      return res.status(401).json({ ok: false, error: 'No family has that username.' });
     }
-    if (!APP_PASSWORD || passwordMatches((req.body || {}).password)) {
-      req.session.regenerate((err) => {
-        if (err) return res.status(500).json({ ok: false, error: 'Could not start a session.' });
-        req.session.ok = true;
-        res.json({ ok: true });
-      });
-      return;
-    }
-    recordFailure(req.ip);
-    res.status(401).json({ ok: false, error: 'That password is not right.' });
+    const wasAdmin = req.session.admin === true;
+    req.session.regenerate((err) => {
+      if (err) return res.status(500).json({ ok: false, error: 'Could not start a session.' });
+      req.session.familyId = rows[0].id;
+      if (wasAdmin) req.session.admin = true;
+      res.json({ ok: true });
+    });
   });
 
   app.post('/logout', (req, res) => {
-    req.session.destroy(() => res.json({ ok: true }));
+    delete req.session.familyId;
+    res.json({ ok: true });
   });
 
-  // Icons and the sign-in page itself must load before signing in.
-  const OPEN = new Set(['/login.html', '/favicon.svg', '/favicon.ico', '/apple-touch-icon.png', '/assets/app.css']);
-  app.use((req, res, next) => {
-    if (signedIn(req) || OPEN.has(req.path)) return next();
+  /* ---- admin: creating families ---- */
+
+  app.use('/admin', admin);
+  app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC, 'admin.html')));
+
+  /* ---- everything else belongs to a family ---- */
+
+  // Styles, icons and the sign-in page load before signing in.
+  const OPEN = new Set(['/login.html', '/admin.html', '/favicon.svg', '/favicon.ico', '/apple-touch-icon.png', '/assets/app.css']);
+  app.use(async (req, res, next) => {
+    if (OPEN.has(req.path)) return next();
+    const familyId = req.session.familyId;
+    if (familyId) {
+      // the family may have been deleted by the admin since this session began
+      const { rows } = await pool.query('SELECT id, name FROM families WHERE id = $1', [familyId]);
+      if (rows[0]) {
+        req.familyId = rows[0].id;
+        req.familyName = rows[0].name;
+        return next();
+      }
+      delete req.session.familyId;
+    }
     if (req.path.startsWith('/api/')) {
-      return res.status(401).json({ ok: false, error: 'Your sign-in has expired. Reload the page to sign in again.' });
+      return res.status(401).json({ ok: false, error: 'You are signed out. Reload the page to sign in again.' });
     }
     res.redirect('/login.html');
   });
 
-  /* ---- app ---- */
-
   app.use('/api', api);
 
-  // index.html carries the delete confirmation word, so it is filled in here. Each
-  // deploy stamps a new version on the assets so nobody runs yesterday's app.js.
+  // index.html carries the family name and the delete confirmation word, so it is
+  // filled in per request. Each deploy stamps a new version on the assets so
+  // nobody runs yesterday's app.js.
   const version = Date.now().toString(36);
   const indexHtml = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')
     .replace(/assets\/app\.(css|js)"/g, `assets/app.$1?v=${version}"`)
-    .replace('__DELETE_WORD__', JSON.stringify(DELETE_WORD).replace(/</g, '\\u003c'))
-    .replace('__SIGN_OUT__', APP_PASSWORD ? '<a href="#" id="signOut">Sign out</a>' : '');
-  const sendIndex = (req, res) => res.set('Cache-Control', 'no-store').type('html').send(indexHtml);
-  app.get(['/', '/index.html'], sendIndex);
+    .replace('__DELETE_WORD__', JSON.stringify(DELETE_WORD).replace(/</g, '\\u003c'));
+  app.get(['/', '/index.html'], (req, res) => {
+    res.set('Cache-Control', 'no-store').type('html').send(indexHtml.replace('__FAMILY__', esc(req.familyName)));
+  });
 
   app.use(express.static(PUBLIC, { maxAge: isProd ? '1h' : 0, index: false }));
 

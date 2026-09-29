@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Sign in - LinkHub</title>
+<title>LinkHub</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.ico" sizes="48x48 32x32 16x16">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -26,13 +26,13 @@
       </div>
       <div>
         <div class="brand-name">LinkHub</div>
-        <div class="brand-tag">Company links, all in one place</div>
+        <div class="brand-tag">Your family's links, all in one place</div>
       </div>
     </div>
     <div class="errbar" id="err"></div>
     <div class="field">
-      <label for="pw">Team password</label>
-      <input class="input" id="pw" name="password" type="password" autocomplete="current-password" required autofocus>
+      <label for="un">Family username</label>
+      <input class="input" id="un" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
     </div>
     <button class="btn btn-primary" id="go" type="submit">Sign in</button>
   </form>
@@ -46,7 +46,7 @@
     fetch("login", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
-      body: "password=" + encodeURIComponent(document.getElementById("pw").value)
+      body: "username=" + encodeURIComponent(document.getElementById("un").value)
     })
       .then(function (r) { return r.json(); })
       .then(function (j) {

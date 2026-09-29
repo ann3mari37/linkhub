@@ -5,6 +5,10 @@
 //   POST /api/save   action=...&...     -> { ok, id? } or { ok:false, error }
 //   GET  /api/icon?linkId=N&url=...     -> { ok, icon }
 //
+// Every request runs as the signed-in family (req.familyId, set in server.js)
+// and every query is limited to that family, so one family can never read or
+// change another's profiles, sections or links - even by guessing ids.
+//
 // Every response is JSON with an `ok` flag; the client shows `error` verbatim.
 const express = require('express');
 const { pool, tx } = require('./db');
@@ -52,24 +56,25 @@ const cleanThumbUrl = (v) => {
 
 const iso = (d) => (d ? new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z') : '');
 
-// The profile asked for if it exists, otherwise the first one by name.
-async function resolveProfileId(want) {
+// The profile asked for if it is in this family, otherwise the family's first one by name.
+async function resolveProfileId(familyId, want) {
   const { rows } = await pool.query(
-    `SELECT id FROM profiles ORDER BY (id = $1) DESC, lower(name), id LIMIT 1`,
-    [int(want)]
+    `SELECT id FROM profiles WHERE family_id = $1 ORDER BY (id = $2) DESC, lower(name), id LIMIT 1`,
+    [familyId, int(want)]
   );
   return rows[0] ? rows[0].id : 0;
 }
 
-async function requireProfile(db, profileId) {
+async function requireProfile(db, familyId, profileId) {
   const id = int(profileId);
   if (id > 0) {
-    const { rowCount } = await db.query('SELECT 1 FROM profiles WHERE id = $1', [id]);
+    const { rowCount } = await db.query('SELECT 1 FROM profiles WHERE id = $1 AND family_id = $2', [id, familyId]);
     if (rowCount) return id;
   }
   fail('Choose your profile first (the button at the top of the page).');
 }
 
+// profileId has already been checked against the family, so its sections are the family's too
 async function requireSection(db, profileId, sectionId) {
   const { rowCount } = await db.query('SELECT 1 FROM sections WHERE id = $1 AND profile_id = $2', [sectionId, profileId]);
   if (!rowCount) fail('That section no longer exists. Reload the page and try again.');
@@ -94,17 +99,19 @@ async function fileLink(db, profileId, linkId, sectionId) {
 /* ---------------- data ---------------- */
 
 router.get('/data', async (req, res) => {
-  const profileId = await resolveProfileId(req.query.profileId);
+  const familyId = req.familyId;
+  const profileId = await resolveProfileId(familyId, req.query.profileId);
   const [profiles, sections, links] = await Promise.all([
-    pool.query('SELECT id, name, color FROM profiles ORDER BY lower(name), id'),
+    pool.query('SELECT id, name, color FROM profiles WHERE family_id = $1 ORDER BY lower(name), id', [familyId]),
     pool.query('SELECT id, title, accent, sort FROM sections WHERE profile_id = $1 ORDER BY sort, id', [profileId]),
     pool.query(
       `SELECT l.*, p.section_id, p.sort, u.last_used, u.use_count
          FROM links l
          LEFT JOIN placements p ON p.link_id = l.id AND p.profile_id = $1
          LEFT JOIN link_usage u ON u.link_id = l.id AND u.profile_id = $1
+        WHERE l.family_id = $2
         ORDER BY p.sort NULLS LAST, lower(l.title), l.id`,
-      [profileId]
+      [profileId, familyId]
     ),
   ]);
 
@@ -136,34 +143,40 @@ router.get('/data', async (req, res) => {
 
 const actions = {
   /* profiles - the only action allowed without a current profile */
-  async 'profile.save'(b) {
+  async 'profile.save'(b, familyId) {
     const name = text(b.name, 100);
     if (!name) fail('Give the profile a name.');
     const c = color(b.color, '#4c8dff');
     const id = int(b.id);
     if (id > 0) {
-      const { rowCount } = await pool.query('UPDATE profiles SET name = $2, color = $3 WHERE id = $1', [id, name, c]);
+      const { rowCount } = await pool.query(
+        'UPDATE profiles SET name = $3, color = $4 WHERE id = $1 AND family_id = $2',
+        [id, familyId, name, c]
+      );
       if (!rowCount) fail('That profile no longer exists.');
       return { id };
     }
-    const { rows } = await pool.query('INSERT INTO profiles (name, color) VALUES ($1, $2) RETURNING id', [name, c]);
+    const { rows } = await pool.query(
+      'INSERT INTO profiles (family_id, name, color) VALUES ($1, $2, $3) RETURNING id',
+      [familyId, name, c]
+    );
     return { id: rows[0].id };
   },
 
-  async 'profile.delete'(b) {
+  async 'profile.delete'(b, familyId) {
     requireConfirm(b.confirm);
     return tx(async (db) => {
-      const { rows } = await db.query('SELECT count(*)::int AS n FROM profiles');
+      const { rows } = await db.query('SELECT count(*)::int AS n FROM profiles WHERE family_id = $1', [familyId]);
       if (rows[0].n <= 1) fail('This is the only profile. Create another one before deleting it.');
-      const { rowCount } = await db.query('DELETE FROM profiles WHERE id = $1', [int(b.id)]);
+      const { rowCount } = await db.query('DELETE FROM profiles WHERE id = $1 AND family_id = $2', [int(b.id), familyId]);
       if (!rowCount) fail('That profile no longer exists.');
       return {};
     });
   },
 
   /* sections - always the current profile's own */
-  async 'section.save'(b) {
-    const profileId = await requireProfile(pool, b.profileId);
+  async 'section.save'(b, familyId) {
+    const profileId = await requireProfile(pool, familyId, b.profileId);
     const title = text(b.title, 100);
     if (!title) fail('Give the section a name.');
     const accent = color(b.accent, '#4c8dff');
@@ -185,17 +198,17 @@ const actions = {
     return { id: rows[0].id };
   },
 
-  async 'section.delete'(b) {
+  async 'section.delete'(b, familyId) {
     requireConfirm(b.confirm);
-    const profileId = await requireProfile(pool, b.profileId);
+    const profileId = await requireProfile(pool, familyId, b.profileId);
     // its placements cascade away, so its links drop back into Unsorted
     const { rowCount } = await pool.query('DELETE FROM sections WHERE id = $1 AND profile_id = $2', [int(b.id), profileId]);
     if (!rowCount) fail('That section no longer exists.');
     return {};
   },
 
-  async 'reorder.sections'(b) {
-    const profileId = await requireProfile(pool, b.profileId);
+  async 'reorder.sections'(b, familyId) {
+    const profileId = await requireProfile(pool, familyId, b.profileId);
     await pool.query(
       `UPDATE sections s SET sort = t.ord - 1
          FROM unnest($2::int[]) WITH ORDINALITY AS t(id, ord)
@@ -205,8 +218,8 @@ const actions = {
     return {};
   },
 
-  /* links - one shared catalog; placement is per profile */
-  async 'link.save'(b) {
+  /* links - one shared catalog per family; placement is per profile */
+  async 'link.save'(b, familyId) {
     const url = cleanUrl(b.url);
     const title = text(b.title, 150);
     if (!url) fail('Give the link a web address.');
@@ -218,12 +231,12 @@ const actions = {
     const id = int(b.id);
 
     return tx(async (db) => {
-      const profileId = sectionId > 0 || int(b.profileId) > 0 ? await requireProfile(db, b.profileId) : 0;
+      const profileId = sectionId > 0 || int(b.profileId) > 0 ? await requireProfile(db, familyId, b.profileId) : 0;
       if (sectionId > 0) await requireSection(db, profileId, sectionId);
 
       let linkId = id;
       if (id > 0) {
-        const { rows } = await db.query('SELECT url FROM links WHERE id = $1 FOR UPDATE', [id]);
+        const { rows } = await db.query('SELECT url FROM links WHERE id = $1 AND family_id = $2 FOR UPDATE', [id, familyId]);
         if (!rows[0]) fail('That link no longer exists. Reload the page and try again.');
         // a new address means the old icon no longer applies
         const sameUrl = rows[0].url === url;
@@ -236,9 +249,9 @@ const actions = {
         );
       } else {
         const { rows } = await db.query(
-          `INSERT INTO links (title, url, description, tips, new_tab, thumb_data, thumb_url)
-           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-          [title, url, desc, tips, newTab, cleanThumbData(b.thumbData), cleanThumbUrl(b.thumbUrl)]
+          `INSERT INTO links (family_id, title, url, description, tips, new_tab, thumb_data, thumb_url)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+          [familyId, title, url, desc, tips, newTab, cleanThumbData(b.thumbData), cleanThumbUrl(b.thumbUrl)]
         );
         linkId = rows[0].id;
       }
@@ -251,27 +264,28 @@ const actions = {
     });
   },
 
-  async 'link.delete'(b) {
+  async 'link.delete'(b, familyId) {
     requireConfirm(b.confirm);
-    const { rowCount } = await pool.query('DELETE FROM links WHERE id = $1', [int(b.id)]);
+    const { rowCount } = await pool.query('DELETE FROM links WHERE id = $1 AND family_id = $2', [int(b.id), familyId]);
     if (!rowCount) fail('That link no longer exists.');
     return {};
   },
 
-  async 'link.reseticon'(b) {
-    await pool.query(`UPDATE links SET thumb_url = '', thumb_data = '' WHERE id = $1`, [int(b.id)]);
+  async 'link.reseticon'(b, familyId) {
+    await pool.query(`UPDATE links SET thumb_url = '', thumb_data = '' WHERE id = $1 AND family_id = $2`, [int(b.id), familyId]);
     iconMisses.clear();
     return {};
   },
 
   // Sent with navigator.sendBeacon as a link opens; never worth an error.
-  async 'link.used'(b) {
+  async 'link.used'(b, familyId) {
     await pool.query(
       `INSERT INTO link_usage (profile_id, link_id, last_used, use_count)
-       SELECT p.id, l.id, now(), 1 FROM profiles p, links l WHERE p.id = $1 AND l.id = $2
+       SELECT p.id, l.id, now(), 1 FROM profiles p, links l
+        WHERE p.id = $1 AND l.id = $2 AND p.family_id = $3 AND l.family_id = $3
        ON CONFLICT (profile_id, link_id) DO UPDATE
          SET last_used = now(), use_count = link_usage.use_count + 1`,
-      [int(b.profileId), int(b.id)]
+      [int(b.profileId), int(b.id), familyId]
     );
     return {};
   },
@@ -279,12 +293,12 @@ const actions = {
   // The full order of one section after a drop. Links listed are filed there in
   // that order (moving them out of wherever they were); links that were in it
   // and are not listed go back to Unsorted. sectionId 0 means "unfile these".
-  async 'reorder.links'(b) {
+  async 'reorder.links'(b, familyId) {
     const sectionId = int(b.sectionId);
     const ids = idList(b.ids);
     if (sectionId < 0) fail('Links cannot be dropped there.');
     return tx(async (db) => {
-      const profileId = await requireProfile(db, b.profileId);
+      const profileId = await requireProfile(db, familyId, b.profileId);
       if (sectionId === 0) {
         await db.query('DELETE FROM placements WHERE profile_id = $1 AND link_id = ANY($2::int[])', [profileId, ids]);
         return {};
@@ -298,10 +312,10 @@ const actions = {
         `INSERT INTO placements (profile_id, link_id, section_id, sort)
          SELECT $1, l.id, $2, (t.ord - 1)::int
            FROM unnest($3::int[]) WITH ORDINALITY AS t(id, ord)
-           JOIN links l ON l.id = t.id
+           JOIN links l ON l.id = t.id AND l.family_id = $4
          ON CONFLICT (profile_id, link_id) DO UPDATE
            SET section_id = EXCLUDED.section_id, sort = EXCLUDED.sort`,
-        [profileId, sectionId, ids]
+        [profileId, sectionId, ids, familyId]
       );
       return {};
     });
@@ -312,7 +326,7 @@ router.post('/save', async (req, res) => {
   const b = req.body || {};
   const fn = Object.prototype.hasOwnProperty.call(actions, b.action) ? actions[b.action] : null;
   if (!fn) return res.status(400).json({ ok: false, error: `Unknown action "${text(b.action, 40)}".` });
-  const out = await fn(b);
+  const out = await fn(b, req.familyId);
   res.json({ ok: true, ...out });
 });
 
@@ -329,7 +343,7 @@ router.get('/icon', async (req, res) => {
   let stored = null;
 
   if (linkId > 0) {
-    const { rows } = await pool.query('SELECT url, thumb_url FROM links WHERE id = $1', [linkId]);
+    const { rows } = await pool.query('SELECT url, thumb_url FROM links WHERE id = $1 AND family_id = $2', [linkId, req.familyId]);
     if (!rows[0]) return res.json({ ok: false, error: 'No such link.' });
     if (rows[0].thumb_url) return res.json({ ok: true, icon: rows[0].thumb_url });
     stored = rows[0].url;

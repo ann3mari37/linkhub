@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<base href="/">
+<title>Families - LinkHub admin</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="48x48 32x32 16x16">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .admin{ max-width:760px; margin:0 auto; padding:28px 16px 60px; }
+  .admin .brand{ margin-bottom:24px; }
+  .card{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+         box-shadow:var(--shadow); padding:22px 22px 20px; margin-bottom:18px; }
+  .card h2{ margin:0 0 4px; font-size:15px; }
+  .card .sub{ color:var(--muted); font-size:12.5px; margin-bottom:16px; }
+  .row2{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .row2 .field{ flex:1 1 180px; margin-bottom:0; }
+  .fam{ display:flex; gap:12px; align-items:center; padding:12px 0; border-top:1px solid var(--border); flex-wrap:wrap; }
+  .fam:first-child{ border-top:0; }
+  .fam-main{ flex:1 1 220px; min-width:0; }
+  .fam-name{ font-weight:600; }
+  .fam-meta{ color:var(--muted); font-size:12.5px; }
+  .fam-meta code{ color:var(--text-2); background:var(--panel-2); padding:1px 6px; border-radius:6px; }
+  .fam-acts{ display:flex; gap:6px; }
+  .fam-edit{ flex:1 1 100%; }
+  .muted{ color:var(--muted); }
+  .topright{ margin-left:auto; }
+</style>
+</head>
+<body>
+<div class="admin">
+  <div class="brand">
+    <div class="brand-mark">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.7.9l.8 1.2H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+    </div>
+    <div>
+      <div class="brand-name">LinkHub admin</div>
+      <div class="brand-tag">Families</div>
+    </div>
+    <button class="btn btn-ghost btn-sm topright" id="out" hidden>Sign out of admin</button>
+  </div>
+
+  <!-- shown until the admin password is accepted -->
+  <form class="card" id="loginCard" hidden>
+    <h2>Admin sign in</h2>
+    <div class="sub">The ADMIN_PASSWORD set on Railway.</div>
+    <div class="errbar" id="loginErr"></div>
+    <div class="row2">
+      <div class="field">
+        <label for="pw">Admin password</label>
+        <input class="input" id="pw" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary" type="submit">Sign in</button>
+    </div>
+  </form>
+
+  <div id="main" hidden>
+    <form class="card" id="addCard">
+      <h2>Add a family</h2>
+      <div class="sub">The username is all a family types to sign in, so pick one that is hard to guess.</div>
+      <div class="errbar" id="addErr"></div>
+      <div class="row2">
+        <div class="field">
+          <label for="a-name">Family name</label>
+          <input class="input" id="a-name" maxlength="100" placeholder="The Smith family" required>
+        </div>
+        <div class="field">
+          <label for="a-user">Username</label>
+          <input class="input" id="a-user" maxlength="40" placeholder="smith-maple-42" autocapitalize="none" spellcheck="false" required>
+        </div>
+        <button class="btn btn-primary" type="submit">Add family</button>
+      </div>
+    </form>
+
+    <div class="card">
+      <h2>Families</h2>
+      <div class="sub">Each family sees only its own links and members.</div>
+      <div class="errbar" id="listErr"></div>
+      <div id="list"><div class="muted">Loading&hellip;</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function showErr(el, msg) { el.textContent = msg; el.classList.add("show"); }
+  function clearErr(el) { el.textContent = ""; el.classList.remove("show"); }
+
+  function call(method, url, body) {
+    return fetch(url, {
+      method: method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store"
+    }).then(function (r) {
+      return r.json().catch(function () { return { ok: false, error: "The server returned an unexpected response." }; })
+        .then(function (j) {
+          if (r.status === 401 && url.indexOf("admin/api/") === 0) { showLogin(); }
+          if (!j.ok) throw new Error(j.error || "Something went wrong.");
+          return j;
+        });
+    });
+  }
+
+  function showLogin() {
+    $("main").hidden = true;
+    $("out").hidden = true;
+    $("loginCard").hidden = false;
+    $("pw").focus();
+  }
+
+  function showMain() {
+    $("loginCard").hidden = true;
+    $("main").hidden = false;
+    $("out").hidden = false;
+  }
+
+  function load() {
+    return call("GET", "admin/api/families").then(function (j) {
+      showMain();
+      render(j.families);
+    }).catch(function (e) {
+      if (!$("loginCard").hidden) return;
+      showErr($("listErr"), e.message);
+    });
+  }
+
+  function render(families) {
+    var list = $("list");
+    if (!families.length) { list.innerHTML = '<div class="muted">No families yet. Add the first one above.</div>'; return; }
+    list.innerHTML = families.map(function (f) {
+      return '<div class="fam" data-id="' + f.id + '">' +
+               '<div class="fam-main">' +
+                 '<div class="fam-name">' + esc(f.name) + "</div>" +
+                 '<div class="fam-meta">username <code>' + esc(f.username) + "</code> &middot; " +
+                   f.profiles + " member" + (f.profiles === 1 ? "" : "s") + " &middot; " +
+                   f.links + " link" + (f.links === 1 ? "" : "s") + "</div>" +
+               "</div>" +
+               '<div class="fam-acts">' +
+                 '<button class="btn btn-sm" data-act="edit">Edit</button>' +
+                 '<button class="btn btn-sm btn-ghost" data-act="del">Delete</button>' +
+               "</div>" +
+             "</div>";
+    }).join("");
+
+    families.forEach(function (f) {
+      var row = list.querySelector('[data-id="' + f.id + '"]');
+      row.querySelector('[data-act="edit"]').addEventListener("click", function () { editRow(row, f); });
+      row.querySelector('[data-act="del"]').addEventListener("click", function () { deleteRow(row, f); });
+    });
+  }
+
+  function panel(row, html) {
+    var old = row.querySelector(".fam-edit");
+    if (old) old.parentNode.removeChild(old);
+    var d = document.createElement("div");
+    d.className = "fam-edit";
+    d.innerHTML = html;
+    row.appendChild(d);
+    return d;
+  }
+
+  function editRow(row, f) {
+    var p = panel(row,
+      '<div class="errbar"></div>' +
+      '<div class="row2">' +
+        '<div class="field"><label>Family name</label><input class="input" data-f="name" maxlength="100" value="' + esc(f.name) + '"></div>' +
+        '<div class="field"><label>Username</label><input class="input" data-f="user" maxlength="40" autocapitalize="none" spellcheck="false" value="' + esc(f.username) + '"></div>' +
+        '<button class="btn btn-primary" data-f="save">Save</button>' +
+        '<button class="btn" data-f="cancel">Cancel</button>' +
+      "</div>" +
+      '<div class="hint muted" style="font-size:12px;margin-top:6px">Changing the username signs nobody out, but next time they sign in they need the new one.</div>');
+    p.querySelector('[data-f="cancel"]').addEventListener("click", function () { p.parentNode.removeChild(p); });
+    p.querySelector('[data-f="save"]').addEventListener("click", function () {
+      var btn = this;
+      btn.disabled = true;
+      call("POST", "admin/api/families/" + f.id, {
+        name: p.querySelector('[data-f="name"]').value,
+        username: p.querySelector('[data-f="user"]').value
+      }).then(load).catch(function (e) {
+        btn.disabled = false;
+        showErr(p.querySelector(".errbar"), e.message);
+      });
+    });
+  }
+
+  function deleteRow(row, f) {
+    var p = panel(row,
+      '<div class="errbar"></div>' +
+      '<div class="danger-note">This deletes <b>' + esc(f.name) + "</b> and everything in it: " +
+        f.profiles + " member(s), " + f.links + " link(s), and all their sections. It cannot be undone.</div>" +
+      '<div class="row2" style="margin-top:10px">' +
+        '<div class="field"><label>Type <span class="confirm-word">' + esc(f.username) + "</span> to confirm</label>" +
+          '<input class="input" data-f="word" autocomplete="off" autocapitalize="none" spellcheck="false"></div>' +
+        '<button class="btn btn-danger" data-f="go" disabled>Delete family</button>' +
+        '<button class="btn" data-f="cancel">Cancel</button>' +
+      "</div>");
+    var word = p.querySelector('[data-f="word"]'), go = p.querySelector('[data-f="go"]');
+    word.focus();
+    word.addEventListener("input", function () {
+      go.disabled = word.value.trim().toLowerCase() !== f.username.toLowerCase();
+    });
+    p.querySelector('[data-f="cancel"]').addEventListener("click", function () { p.parentNode.removeChild(p); });
+    go.addEventListener("click", function () {
+      go.disabled = true;
+      call("POST", "admin/api/families/" + f.id + "/delete", { confirm: word.value })
+        .then(load).catch(function (e) {
+          go.disabled = false;
+          showErr(p.querySelector(".errbar"), e.message);
+        });
+    });
+  }
+
+  $("loginCard").addEventListener("submit", function (e) {
+    e.preventDefault();
+    clearErr($("loginErr"));
+    call("POST", "admin/login", { password: $("pw").value })
+      .then(function () { $("pw").value = ""; return load(); })
+      .catch(function (e2) { showErr($("loginErr"), e2.message); });
+  });
+
+  $("addCard").addEventListener("submit", function (e) {
+    e.preventDefault();
+    clearErr($("addErr"));
+    call("POST", "admin/api/families", { name: $("a-name").value, username: $("a-user").value })
+      .then(function () { $("a-name").value = ""; $("a-user").value = ""; return load(); })
+      .catch(function (e2) { showErr($("addErr"), e2.message); });
+  });
+
+  $("out").addEventListener("click", function () {
+    call("POST", "admin/logout").then(showLogin, showLogin);
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
