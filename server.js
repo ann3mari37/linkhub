@@ -63,13 +63,13 @@ async function main() {
     })
   );
 
-  /* ---- family sign in: the family username is the whole sign-in ---- */
+  /* ---- family sign in: any one of the family's usernames is the whole sign-in ---- */
 
   app.post('/login', async (req, res) => {
     if (guard.blocked('family', req.ip)) return res.status(429).json({ ok: false, error: guard.TOO_MANY });
     const username = String((req.body || {}).username || '').trim().toLowerCase();
     const { rows } = username
-      ? await pool.query('SELECT id FROM families WHERE lower(username) = $1', [username])
+      ? await pool.query('SELECT id FROM family_usernames WHERE lower(username) = $1', [username])
       : { rows: [] };
     if (!rows[0]) {
       guard.recordFailure('family', req.ip);
@@ -78,14 +78,15 @@ async function main() {
     const wasAdmin = req.session.admin === true;
     req.session.regenerate((err) => {
       if (err) return res.status(500).json({ ok: false, error: 'Could not start a session.' });
-      req.session.familyId = rows[0].id;
+      // the username, not the family, so removing a username signs out whoever used it
+      req.session.usernameId = rows[0].id;
       if (wasAdmin) req.session.admin = true;
       res.json({ ok: true });
     });
   });
 
   app.post('/logout', (req, res) => {
-    delete req.session.familyId;
+    delete req.session.usernameId;
     res.json({ ok: true });
   });
 
@@ -100,16 +101,19 @@ async function main() {
   const OPEN = new Set(['/login.html', '/admin.html', '/favicon.svg', '/favicon.ico', '/apple-touch-icon.png', '/assets/app.css']);
   app.use(async (req, res, next) => {
     if (OPEN.has(req.path)) return next();
-    const familyId = req.session.familyId;
-    if (familyId) {
-      // the family may have been deleted by the admin since this session began
-      const { rows } = await pool.query('SELECT id, name FROM families WHERE id = $1', [familyId]);
+    const usernameId = req.session.usernameId;
+    if (usernameId) {
+      // the admin may have removed the username, or the family, since this session began
+      const { rows } = await pool.query(
+        'SELECT f.id, f.name FROM family_usernames u JOIN families f ON f.id = u.family_id WHERE u.id = $1',
+        [usernameId]
+      );
       if (rows[0]) {
         req.familyId = rows[0].id;
         req.familyName = rows[0].name;
         return next();
       }
-      delete req.session.familyId;
+      delete req.session.usernameId;
     }
     if (req.path.startsWith('/api/')) {
       return res.status(401).json({ ok: false, error: 'You are signed out. Reload the page to sign in again.' });

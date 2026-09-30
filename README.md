@@ -8,8 +8,8 @@ HTML/CSS/JS in `public/`.
 
 ## How it works
 
-- **Families.** Each family signs in with its **family username** (no password) and sees only its
-  own links and members. Nothing is shared between families.
+- **Families.** A family can have several **usernames**; typing any one of them (no password) signs
+  in to that family, which sees only its own links and members. Nothing is shared between families.
 - **One catalog per family.** Every link a family adds is visible to all its members. Adding,
   editing or deleting a link changes it for the whole family.
 - **Profiles (members).** After signing in, each person picks their profile (remembered per
@@ -26,16 +26,20 @@ HTML/CSS/JS in `public/`.
 
 ## Families and the admin page
 
-Only the admin creates families, at **`/admin`**, signed in with `ADMIN_PASSWORD`. There you can
-add a family (a display name plus the username they sign in with), rename it, change its
-username, or delete it with everything in it.
+Only the admin creates families, at **`/admin`**, signed in with `ADMIN_PASSWORD`. There you can:
 
-The family username is the only thing standing between one family and another's links, so make
-each one hard to guess (`smith-maple-42`, not `smith`). Wrong usernames are limited to 10 tries per
-15 minutes per device.
+- **Add a family** with a display name and its first username.
+- **Add usernames** to a family (for example one per person) and **remove** them. Removing a
+  username signs out anyone who signed in with it. A family always keeps at least one.
+- **Rename** a family, or **delete** it with everything in it (confirmed by typing its name).
+
+Usernames are unique across all families. A username is the only thing standing between one family
+and another's links, so make each one hard to guess (`smith-maple-42`, not `smith`). Wrong
+usernames are limited to 10 tries per 15 minutes per device.
 
 Links and profiles created before families existed are moved into a first family with the
-username **`family`** on the first start. Rename it in `/admin`.
+username **`family`** on the first start. Add better usernames to it in `/admin`, then remove
+`family`.
 
 ## Deploy on Railway
 
@@ -83,4 +87,4 @@ limited to the signed-in family:
 - `GET /api/icon?linkId=N&url=...` → the site's declared icon
 
 Sign-in: `POST /login` with `username`, `POST /logout`. Admin: `POST /admin/login`, and
-`/admin/api/families` to list, create, update and delete families.
+`/admin/api/families` to list, create, rename and delete families and add or remove their usernames.

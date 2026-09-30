@@ -1,15 +1,17 @@
-// The admin page's API: create, rename and delete families. Only the person
-// holding ADMIN_PASSWORD can use it; without that variable it is switched off.
+// The admin page's API: families and their usernames. Only the person holding
+// ADMIN_PASSWORD can use it; without that variable it is switched off.
 //
-//   POST /admin/login                 { password }
+//   POST /admin/login                          { password }
 //   POST /admin/logout
-//   GET  /admin/api/families          -> { ok, families }
-//   POST /admin/api/families          { name, username }      -> { ok, id }
-//   POST /admin/api/families/:id      { name, username }
-//   POST /admin/api/families/:id/delete  { confirm: <the family's username> }
+//   GET  /admin/api/families                   -> { ok, families: [{ ..., usernames: [{ id, username }] }] }
+//   POST /admin/api/families                   { name, username }  -> { ok, id }   (a family starts with one username)
+//   POST /admin/api/families/:id               { name }            rename
+//   POST /admin/api/families/:id/delete        { confirm: <the family's name> }
+//   POST /admin/api/families/:id/usernames     { username }        add a username
+//   POST /admin/api/usernames/:id/delete                           remove a username
 const crypto = require('crypto');
 const express = require('express');
-const { pool } = require('./db');
+const { pool, tx } = require('./db');
 const guard = require('./guard');
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -27,23 +29,28 @@ function passwordMatches(given) {
 }
 
 const text = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+const idParam = (req) => parseInt(req.params.id, 10) || 0;
 
-function cleanFamily(body) {
-  const name = text(body.name, 100);
-  const username = text(body.username, 40).toLowerCase();
+function cleanName(v) {
+  const name = text(v, 100);
   if (!name) fail('Give the family a name.');
+  return name;
+}
+
+function cleanUsername(v) {
+  const username = text(v, 40).toLowerCase();
   if (!/^[a-z0-9][a-z0-9._-]{2,39}$/.test(username)) {
-    fail('The username needs 3 to 40 characters: letters, numbers, dots, dashes or underscores.');
+    fail('A username needs 3 to 40 characters: letters, numbers, dots, dashes or underscores.');
   }
-  return { name, username };
+  return username;
 }
 
 // A clash on the unique username index becomes a readable message.
-async function write(sql, params) {
+async function addUsername(db, familyId, username) {
   try {
-    return await pool.query(sql, params);
+    await db.query('INSERT INTO family_usernames (family_id, username) VALUES ($1, $2)', [familyId, username]);
   } catch (err) {
-    if (err.code === '23505') fail('Another family already uses that username.');
+    if (err.code === '23505') fail(`"${username}" is already in use. Usernames must be unique across all families.`);
     throw err;
   }
 }
@@ -72,9 +79,11 @@ router.use('/api', (req, res, next) => {
 
 router.get('/api/families', async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT f.id, f.name, f.username, f.created_at,
+    `SELECT f.id, f.name, f.created_at,
             (SELECT count(*)::int FROM profiles p WHERE p.family_id = f.id) AS profiles,
-            (SELECT count(*)::int FROM links l WHERE l.family_id = f.id) AS links
+            (SELECT count(*)::int FROM links l WHERE l.family_id = f.id) AS links,
+            COALESCE((SELECT json_agg(json_build_object('id', u.id, 'username', u.username) ORDER BY lower(u.username))
+                        FROM family_usernames u WHERE u.family_id = f.id), '[]') AS usernames
        FROM families f
       ORDER BY lower(f.name), f.id`
   );
@@ -82,30 +91,58 @@ router.get('/api/families', async (req, res) => {
 });
 
 router.post('/api/families', async (req, res) => {
-  const { name, username } = cleanFamily(req.body || {});
-  const { rows } = await write('INSERT INTO families (name, username) VALUES ($1, $2) RETURNING id', [name, username]);
-  res.json({ ok: true, id: rows[0].id });
+  const b = req.body || {};
+  const name = cleanName(b.name);
+  const username = cleanUsername(b.username);
+  const id = await tx(async (db) => {
+    const { rows } = await db.query('INSERT INTO families (name) VALUES ($1) RETURNING id', [name]);
+    await addUsername(db, rows[0].id, username);
+    return rows[0].id;
+  });
+  res.json({ ok: true, id });
 });
 
 router.post('/api/families/:id', async (req, res) => {
-  const { name, username } = cleanFamily(req.body || {});
-  const { rowCount } = await write('UPDATE families SET name = $2, username = $3 WHERE id = $1', [
-    parseInt(req.params.id, 10) || 0, name, username,
-  ]);
+  const name = cleanName((req.body || {}).name);
+  const { rowCount } = await pool.query('UPDATE families SET name = $2 WHERE id = $1', [idParam(req), name]);
   if (!rowCount) fail('That family no longer exists.');
   res.json({ ok: true });
 });
 
-// Deleting a family deletes everything in it: its profiles, links, sections and
-// layout all cascade. Confirmed by typing the family's username.
+// Deleting a family deletes everything in it: its usernames, profiles, links,
+// sections and layout all cascade. Confirmed by typing the family's name.
 router.post('/api/families/:id/delete', async (req, res) => {
-  const id = parseInt(req.params.id, 10) || 0;
-  const { rows } = await pool.query('SELECT username FROM families WHERE id = $1', [id]);
+  const id = idParam(req);
+  const { rows } = await pool.query('SELECT name FROM families WHERE id = $1', [id]);
   if (!rows[0]) fail('That family no longer exists.');
-  if (text((req.body || {}).confirm, 40).toLowerCase() !== rows[0].username.toLowerCase()) {
-    fail(`Type ${rows[0].username} to confirm.`);
+  if (text((req.body || {}).confirm, 100).toLowerCase() !== rows[0].name.trim().toLowerCase()) {
+    fail(`Type the family name, ${rows[0].name}, to confirm.`);
   }
   await pool.query('DELETE FROM families WHERE id = $1', [id]);
+  res.json({ ok: true });
+});
+
+router.post('/api/families/:id/usernames', async (req, res) => {
+  const familyId = idParam(req);
+  const username = cleanUsername((req.body || {}).username);
+  const { rowCount } = await pool.query('SELECT 1 FROM families WHERE id = $1', [familyId]);
+  if (!rowCount) fail('That family no longer exists.');
+  await addUsername(pool, familyId, username);
+  res.json({ ok: true });
+});
+
+// Anyone signed in with this username is signed out on their next request.
+// A family must keep at least one, or nobody could ever sign in to it.
+router.post('/api/usernames/:id/delete', async (req, res) => {
+  await tx(async (db) => {
+    const { rows } = await db.query('SELECT family_id FROM family_usernames WHERE id = $1', [idParam(req)]);
+    if (!rows[0]) fail('That username no longer exists.');
+    // lock the family so two removals at once cannot leave it with none
+    await db.query('SELECT 1 FROM families WHERE id = $1 FOR UPDATE', [rows[0].family_id]);
+    const { rows: c } = await db.query('SELECT count(*)::int AS n FROM family_usernames WHERE family_id = $1', [rows[0].family_id]);
+    if (c[0].n <= 1) fail('This is the family\'s only username. Add another one before removing it.');
+    await db.query('DELETE FROM family_usernames WHERE id = $1', [idParam(req)]);
+  });
   res.json({ ok: true });
 });
 

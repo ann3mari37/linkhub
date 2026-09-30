@@ -29,6 +29,15 @@
   .fam-edit{ flex:1 1 100%; }
   .muted{ color:var(--muted); }
   .topright{ margin-left:auto; }
+  .unames{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  .uname{ display:inline-flex; align-items:center; gap:2px; background:var(--panel-2); border:1px solid var(--line);
+          border-radius:999px; padding:2px 4px 2px 10px; font:12.5px ui-monospace, SFMono-Regular, Consolas, monospace; color:var(--text-2); }
+  .uname button{ background:none; border:0; color:var(--faint); cursor:pointer; font-size:15px; line-height:1;
+                 width:20px; height:20px; border-radius:50%; }
+  .uname button:hover{ color:var(--danger); background:var(--danger-dim); }
+  .uname-add{ display:inline-flex; gap:6px; }
+  .uname-add .input{ width:180px; padding-top:4px; padding-bottom:4px; font-size:12.5px; }
+  .fam-err{ flex:1 1 100%; }
 </style>
 </head>
 <body>
@@ -61,7 +70,8 @@
   <div id="main" hidden>
     <form class="card" id="addCard">
       <h2>Add a family</h2>
-      <div class="sub">The username is all a family types to sign in, so pick one that is hard to guess.</div>
+      <div class="sub">A username is all anyone types to sign in, so pick ones that are hard to guess.
+        You can add more usernames to the family afterwards.</div>
       <div class="errbar" id="addErr"></div>
       <div class="row2">
         <div class="field">
@@ -69,7 +79,7 @@
           <input class="input" id="a-name" maxlength="100" placeholder="The Smith family" required>
         </div>
         <div class="field">
-          <label for="a-user">Username</label>
+          <label for="a-user">First username</label>
           <input class="input" id="a-user" maxlength="40" placeholder="smith-maple-42" autocapitalize="none" spellcheck="false" required>
         </div>
         <button class="btn btn-primary" type="submit">Add family</button>
@@ -78,7 +88,8 @@
 
     <div class="card">
       <h2>Families</h2>
-      <div class="sub">Each family sees only its own links and members.</div>
+      <div class="sub">Each family sees only its own links and members. Any of a family's usernames signs in to it;
+        removing one signs out whoever used it.</div>
       <div class="errbar" id="listErr"></div>
       <div id="list"><div class="muted">Loading&hellip;</div></div>
     </div>
@@ -139,24 +150,59 @@
     var list = $("list");
     if (!families.length) { list.innerHTML = '<div class="muted">No families yet. Add the first one above.</div>'; return; }
     list.innerHTML = families.map(function (f) {
+      var only = f.usernames.length <= 1;
       return '<div class="fam" data-id="' + f.id + '">' +
                '<div class="fam-main">' +
                  '<div class="fam-name">' + esc(f.name) + "</div>" +
-                 '<div class="fam-meta">username <code>' + esc(f.username) + "</code> &middot; " +
+                 '<div class="fam-meta">' +
                    f.profiles + " member" + (f.profiles === 1 ? "" : "s") + " &middot; " +
                    f.links + " link" + (f.links === 1 ? "" : "s") + "</div>" +
+                 '<div class="unames">' +
+                   f.usernames.map(function (u) {
+                     return '<span class="uname">' + esc(u.username) +
+                              '<button type="button" data-uid="' + u.id + '" ' +
+                                (only ? 'title="A family needs at least one username" disabled style="visibility:hidden"'
+                                      : 'title="Remove ' + esc(u.username) + '" aria-label="Remove ' + esc(u.username) + '"') +
+                              ">&times;</button></span>";
+                   }).join("") +
+                   '<form class="uname-add">' +
+                     '<input class="input" maxlength="40" placeholder="Add a username" autocapitalize="none" spellcheck="false" aria-label="New username for ' + esc(f.name) + '">' +
+                     '<button class="btn btn-sm" type="submit">Add</button>' +
+                   "</form>" +
+                 "</div>" +
                "</div>" +
                '<div class="fam-acts">' +
-                 '<button class="btn btn-sm" data-act="edit">Edit</button>' +
+                 '<button class="btn btn-sm" data-act="edit">Rename</button>' +
                  '<button class="btn btn-sm btn-ghost" data-act="del">Delete</button>' +
                "</div>" +
+               '<div class="errbar fam-err"></div>' +
              "</div>";
     }).join("");
 
     families.forEach(function (f) {
       var row = list.querySelector('[data-id="' + f.id + '"]');
+      var err = row.querySelector(".fam-err");
       row.querySelector('[data-act="edit"]').addEventListener("click", function () { editRow(row, f); });
       row.querySelector('[data-act="del"]').addEventListener("click", function () { deleteRow(row, f); });
+
+      row.querySelectorAll("[data-uid]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          var name = b.parentNode.firstChild.nodeValue;
+          if (!confirm("Remove the username " + name + "? Anyone signed in with it is signed out.")) return;
+          b.disabled = true;
+          call("POST", "admin/api/usernames/" + b.getAttribute("data-uid") + "/delete")
+            .then(load).catch(function (e) { b.disabled = false; showErr(err, e.message); });
+        });
+      });
+
+      var add = row.querySelector(".uname-add");
+      add.addEventListener("submit", function (e) {
+        e.preventDefault();
+        clearErr(err);
+        var input = add.querySelector("input");
+        call("POST", "admin/api/families/" + f.id + "/usernames", { username: input.value })
+          .then(load).catch(function (e2) { showErr(err, e2.message); input.focus(); });
+      });
     });
   }
 
@@ -175,18 +221,15 @@
       '<div class="errbar"></div>' +
       '<div class="row2">' +
         '<div class="field"><label>Family name</label><input class="input" data-f="name" maxlength="100" value="' + esc(f.name) + '"></div>' +
-        '<div class="field"><label>Username</label><input class="input" data-f="user" maxlength="40" autocapitalize="none" spellcheck="false" value="' + esc(f.username) + '"></div>' +
         '<button class="btn btn-primary" data-f="save">Save</button>' +
         '<button class="btn" data-f="cancel">Cancel</button>' +
-      "</div>" +
-      '<div class="hint muted" style="font-size:12px;margin-top:6px">Changing the username signs nobody out, but next time they sign in they need the new one.</div>');
+      "</div>");
     p.querySelector('[data-f="cancel"]').addEventListener("click", function () { p.parentNode.removeChild(p); });
     p.querySelector('[data-f="save"]').addEventListener("click", function () {
       var btn = this;
       btn.disabled = true;
       call("POST", "admin/api/families/" + f.id, {
-        name: p.querySelector('[data-f="name"]').value,
-        username: p.querySelector('[data-f="user"]').value
+        name: p.querySelector('[data-f="name"]').value
       }).then(load).catch(function (e) {
         btn.disabled = false;
         showErr(p.querySelector(".errbar"), e.message);
@@ -198,17 +241,18 @@
     var p = panel(row,
       '<div class="errbar"></div>' +
       '<div class="danger-note">This deletes <b>' + esc(f.name) + "</b> and everything in it: " +
-        f.profiles + " member(s), " + f.links + " link(s), and all their sections. It cannot be undone.</div>" +
+        f.usernames.length + " username(s), " + f.profiles + " member(s), " + f.links +
+        " link(s), and all their sections. It cannot be undone.</div>" +
       '<div class="row2" style="margin-top:10px">' +
-        '<div class="field"><label>Type <span class="confirm-word">' + esc(f.username) + "</span> to confirm</label>" +
-          '<input class="input" data-f="word" autocomplete="off" autocapitalize="none" spellcheck="false"></div>' +
+        '<div class="field"><label>Type the family name, <span class="confirm-word">' + esc(f.name) + "</span>, to confirm</label>" +
+          '<input class="input" data-f="word" autocomplete="off" spellcheck="false"></div>' +
         '<button class="btn btn-danger" data-f="go" disabled>Delete family</button>' +
         '<button class="btn" data-f="cancel">Cancel</button>' +
       "</div>");
     var word = p.querySelector('[data-f="word"]'), go = p.querySelector('[data-f="go"]');
     word.focus();
     word.addEventListener("input", function () {
-      go.disabled = word.value.trim().toLowerCase() !== f.username.toLowerCase();
+      go.disabled = word.value.trim().toLowerCase() !== f.name.trim().toLowerCase();
     });
     p.querySelector('[data-f="cancel"]').addEventListener("click", function () { p.parentNode.removeChild(p); });
     go.addEventListener("click", function () {

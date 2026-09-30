@@ -1,18 +1,39 @@
 -- Safe to run on every start: everything is IF NOT EXISTS.
 --
--- The model: a family signs in with its username and sees only its own links.
--- Within a family, links are ONE shared catalog that every member sees.
--- Sections, and which link sits in which section in what order, belong to a
--- profile (a member). A link with no placement for a profile shows up in that
--- profile's virtual "Unsorted" section - there is no row for Unsorted.
+-- The model: a family signs in with any one of its usernames and sees only
+-- its own links. Within a family, links are ONE shared catalog that every
+-- member sees. Sections, and which link sits in which section in what order,
+-- belong to a profile (a member). A link with no placement for a profile shows
+-- up in that profile's virtual "Unsorted" section - there is no row for Unsorted.
 
 CREATE TABLE IF NOT EXISTS families (
   id          SERIAL PRIMARY KEY,
   name        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Each family can have several usernames; any of them signs in to it.
+CREATE TABLE IF NOT EXISTS family_usernames (
+  id          SERIAL PRIMARY KEY,
+  family_id   INT NOT NULL REFERENCES families(id) ON DELETE CASCADE,
   username    TEXT NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS families_username_key ON families ((lower(username)));
+CREATE UNIQUE INDEX IF NOT EXISTS family_usernames_username_key ON family_usernames ((lower(username)));
+CREATE INDEX IF NOT EXISTS family_usernames_family_idx ON family_usernames (family_id);
+
+-- Families used to have exactly one username, kept on the family row. Move it
+-- into family_usernames, then drop the old column (and its index with it).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = current_schema() AND table_name = 'families' AND column_name = 'username') THEN
+    INSERT INTO family_usernames (family_id, username)
+    SELECT f.id, f.username FROM families f
+     WHERE NOT EXISTS (SELECT 1 FROM family_usernames u WHERE lower(u.username) = lower(f.username));
+    ALTER TABLE families DROP COLUMN username;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS profiles (
   id          SERIAL PRIMARY KEY,
@@ -48,7 +69,8 @@ BEGIN
      OR EXISTS (SELECT 1 FROM links WHERE family_id IS NULL) THEN
     SELECT id INTO fid FROM families ORDER BY id LIMIT 1;
     IF fid IS NULL THEN
-      INSERT INTO families (name, username) VALUES ('My family', 'family') RETURNING id INTO fid;
+      INSERT INTO families (name) VALUES ('My family') RETURNING id INTO fid;
+      INSERT INTO family_usernames (family_id, username) VALUES (fid, 'family') ON CONFLICT DO NOTHING;
     END IF;
     UPDATE profiles SET family_id = fid WHERE family_id IS NULL;
     UPDATE links    SET family_id = fid WHERE family_id IS NULL;
