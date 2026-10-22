@@ -1,15 +1,14 @@
 // Finds the icon a site declares for itself. The browser cannot read another
-// origin's HTML (CORS), so the server does it: fetch the page, read its
+// origin's HTML (CORS), so the Worker does it: fetch the page, read its
 // <link rel="icon">, follow redirects, and confirm the answer really is an
-// image. Returns an absolute URL the browser can load, or ''.
-const dns = require('dns').promises;
-const net = require('net');
+// image. Returns an absolute URL (or an embedded data: URI) the browser can
+// load, or ''.
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
 
 // Whatever was typed into the address field, as an http(s) URL - or null.
-function httpUrlOf(input) {
+export function httpUrlOf(input) {
   let s = String(input || '').trim();
   if (!s || s.startsWith('\\')) return null; // UNC share - nothing to fetch
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = 'https://' + s;
@@ -24,37 +23,35 @@ function httpUrlOf(input) {
   return u.toString();
 }
 
-function isPrivateIp(ip) {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number);
-    return (
-      a === 0 || a === 10 || a === 127 || a >= 224 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127)
-    );
-  }
-  const v = ip.toLowerCase();
-  if (v === '::1' || v === '::') return true;
-  if (v.startsWith('::ffff:')) return isPrivateIp(v.slice(7));
-  return v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80');
+function isPrivateIpv4(host) {
+  const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return (
+    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
 }
 
-// Refuse to fetch anything on a private network (the server must not be used to probe internals).
-async function assertPublicHost(hostname) {
-  const host = hostname.replace(/^\[|\]$/g, '');
-  if (host === 'localhost' || host.endsWith('.internal') || host.endsWith('.local')) throw new Error('blocked host');
-  if (net.isIP(host)) {
-    if (isPrivateIp(host)) throw new Error('blocked host');
-    return;
+// Refuse obviously internal addresses. (Cloudflare does not route Worker requests
+// to private networks anyway; this keeps local development honest too.)
+function assertPublicHost(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) {
+    throw new Error('blocked host');
   }
-  const addrs = await dns.lookup(host, { all: true });
-  if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) throw new Error('blocked host');
+  if (isPrivateIpv4(host)) throw new Error('blocked host');
+  if (host.includes(':')) {
+    // IPv6 literal: loopback, unspecified, unique-local and link-local are internal
+    if (host === '::1' || host === '::' || /^(fc|fd|fe80)/.test(host) || host.startsWith('::ffff:')) throw new Error('blocked host');
+  }
 }
 
 async function readLimited(res, maxBytes, allowTruncate) {
-  if (!res.body) return Buffer.alloc(0);
+  if (!res.body) return new Uint8Array(0);
   const reader = res.body.getReader();
   const chunks = [];
   let total = 0;
@@ -70,7 +67,13 @@ async function readLimited(res, maxBytes, allowTruncate) {
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks.map((c) => Buffer.from(c)));
+  const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
 }
 
 async function safeFetch(url, { maxBytes, accept, allowTruncate = false }) {
@@ -78,7 +81,7 @@ async function safeFetch(url, { maxBytes, accept, allowTruncate = false }) {
   for (let hop = 0; hop < 6; hop++) {
     const u = new URL(current);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('bad protocol');
-    await assertPublicHost(u.hostname);
+    assertPublicHost(u.hostname);
     const res = await fetch(current, {
       redirect: 'manual',
       signal: AbortSignal.timeout(6000),
@@ -94,11 +97,12 @@ async function safeFetch(url, { maxBytes, accept, allowTruncate = false }) {
       res.body?.cancel().catch(() => {});
       throw new Error('HTTP ' + res.status);
     }
-    const buf = await readLimited(res, maxBytes, allowTruncate);
-    return { url: current, buf };
+    return { url: current, buf: await readLimited(res, maxBytes, allowTruncate) };
   }
   throw new Error('too many redirects');
 }
+
+const latin1 = (buf, from, to) => String.fromCharCode(...buf.subarray(from, to));
 
 // Identify an image from its bytes; rejects HTML error pages served with status 200.
 function isImage(buf) {
@@ -106,9 +110,9 @@ function isImage(buf) {
   if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true; // png
   if (buf[0] === 0 && buf[1] === 0 && (buf[2] === 1 || buf[2] === 2) && buf[3] === 0) return true; // ico
   if (buf[0] === 0xff && buf[1] === 0xd8) return true; // jpeg
-  if (buf.subarray(0, 3).toString('latin1') === 'GIF') return true;
-  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return true;
-  const head = buf.subarray(0, 1024).toString('utf8').replace(/^﻿/, '').trimStart().toLowerCase();
+  if (latin1(buf, 0, 3) === 'GIF') return true;
+  if (latin1(buf, 0, 4) === 'RIFF' && latin1(buf, 8, 12) === 'WEBP') return true;
+  const head = new TextDecoder().decode(buf.subarray(0, 1024)).replace(/^﻿/, '').trimStart().toLowerCase();
   return head.startsWith('<svg') || ((head.startsWith('<?xml') || head.startsWith('<!--')) && head.includes('<svg'));
 }
 
@@ -163,14 +167,16 @@ function dataIcon(uri) {
   if (!m || !m[1]) return '';
   let buf;
   try {
-    buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
+    buf = m[2]
+      ? Uint8Array.from(atob(m[3].replace(/\s+/g, '')), (ch) => ch.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(m[3]));
   } catch {
     return '';
   }
   return isImage(buf) ? uri : '';
 }
 
-async function findIcon(rawUrl) {
+export async function findIcon(rawUrl) {
   const url = httpUrlOf(rawUrl);
   if (!url) return '';
   const candidates = [];
@@ -180,7 +186,7 @@ async function findIcon(rawUrl) {
       accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
       allowTruncate: true,
     });
-    candidates.push(...parseIconLinks(page.buf.toString('utf8'), page.url));
+    candidates.push(...parseIconLinks(new TextDecoder().decode(page.buf), page.url));
     // after redirects the canonical host is the one whose favicon counts
     candidates.push(new URL('/favicon.ico', page.url).toString());
   } catch {
@@ -201,5 +207,3 @@ async function findIcon(rawUrl) {
   }
   return '';
 }
-
-module.exports = { findIcon, httpUrlOf };

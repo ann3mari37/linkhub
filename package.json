@@ -1,20 +1,23 @@
 {
   "name": "linkhub",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Company links, all in one place: one shared link catalog, with sections and layout per profile.",
-  "main": "server.js",
+  "description": "Your family's links, all in one place — Cloudflare Workers + Supabase",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --env-file=.env --watch server.js"
-  },
-  "engines": {
-    "node": ">=22"
+    "dev": "node scripts/dev.mjs",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "copy-from-railway": "node --env-file=.env scripts/copy-from-railway.mjs"
   },
   "dependencies": {
-    "connect-pg-simple": "^10.0.0",
-    "express": "^5.1.0",
-    "express-session": "^1.18.1",
-    "pg": "^8.13.1"
+    "postgres": "3.4.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "wrangler": "4.49.1"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

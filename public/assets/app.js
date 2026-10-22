@@ -5,7 +5,7 @@
 (function () {
   "use strict";
 
-  var DELETE_WORD = (window.LH_DELETE_WORD || "yes").toLowerCase();
+  var DELETE_WORD = ((document.querySelector('meta[name="lh-delete-word"]') || {}).content || "yes").toLowerCase();
 
   var state = {
     profiles: [], profileId: 0, sections: [], links: [], filter: "",
@@ -101,7 +101,7 @@
     return fetch(url, opts).then(function (res) {
       if (timer) clearTimeout(timer);
       /* signed out (session expired or password changed) - back to the sign-in page */
-      if (res.status === 401) location.href = "login.html";
+      if (res.status === 401) location.href = "/login";
       return res;
     }, function (err) {
       if (timer) clearTimeout(timer);
@@ -1725,7 +1725,7 @@
   if (signOut) {
     signOut.addEventListener("click", function (e) {
       e.preventDefault();
-      fetch("logout", { method: "POST" }).then(function () { location.href = "login.html"; });
+      fetch("/logout", { method: "POST" }).then(function () { location.href = "/login"; });
     });
   }
 
