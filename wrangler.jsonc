@@ -14,17 +14,22 @@
     "run_worker_first": true
   },
   "observability": { "enabled": true },
-  // Served at links.kittigutierrez.com (Cloudflare creates the DNS record and certificate),
-  // from the ann3mari37@gmail.com account that holds kittigutierrez.com.
+  // Served at links.kittigutierrez.com and links.jamry.us (Cloudflare creates the DNS records
+  // and certificates), from the ann3mari37@gmail.com account. Each address has its own sign-in,
+  // since cookies belong to one domain.
   "account_id": "1ee0ccf466cef622b87273a6b7d79056",
-  "routes": [{ "pattern": "links.kittigutierrez.com", "custom_domain": true }],
+  "routes": [
+    { "pattern": "links.kittigutierrez.com", "custom_domain": true },
+    { "pattern": "links.jamry.us", "custom_domain": true }
+  ],
 
-  // links.jamry.us lives in the annemarie@ohrrenova.com account, and a Worker can only use a
-  // domain from its own account, so the same code is deployed there too:
+  // TEMPORARY, until jamry.us finishes moving into the gmail account: jamry.us is still
+  // served from the annemarie@ohrrenova.com account, and a Worker can only use a domain from
+  // its own account, so the same code is deployed there as well:
   //   npx wrangler deploy --env jamry          (signed in to wrangler as annemarie@ohrrenova.com)
-  // Both copies use the same Supabase database (each needs its own DATABASE_URL and
-  // ADMIN_PASSWORD secrets), so both addresses show the same families and links. Each address
-  // has its own sign-in, since cookies belong to one domain.
+  // It uses the same Supabase database, so both addresses show the same families and links.
+  // Once jamry.us's nameservers are alec/ariella.ns.cloudflare.com, the gmail Worker above
+  // answers for links.jamry.us; then delete the ohrrenova "linkhub" Worker and this block.
   "env": {
     "jamry": {
       "name": "linkhub",
