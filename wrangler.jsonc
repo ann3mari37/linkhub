@@ -14,8 +14,24 @@
     "run_worker_first": true
   },
   "observability": { "enabled": true },
-  // Served at links.kittigutierrez.com (Cloudflare creates the DNS record and certificate).
-  "routes": [{ "pattern": "links.kittigutierrez.com", "custom_domain": true }]
+  // Served at links.kittigutierrez.com (Cloudflare creates the DNS record and certificate),
+  // from the ann3mari37@gmail.com account that holds kittigutierrez.com.
+  "account_id": "1ee0ccf466cef622b87273a6b7d79056",
+  "routes": [{ "pattern": "links.kittigutierrez.com", "custom_domain": true }],
+
+  // links.jamry.us lives in the annemarie@ohrrenova.com account, and a Worker can only use a
+  // domain from its own account, so the same code is deployed there too:
+  //   npx wrangler deploy --env jamry          (signed in to wrangler as annemarie@ohrrenova.com)
+  // Both copies use the same Supabase database (each needs its own DATABASE_URL and
+  // ADMIN_PASSWORD secrets), so both addresses show the same families and links. Each address
+  // has its own sign-in, since cookies belong to one domain.
+  "env": {
+    "jamry": {
+      "name": "linkhub",
+      "account_id": "cd54bbe8e919bce7ccdf2e34df768273",
+      "routes": [{ "pattern": "links.jamry.us", "custom_domain": true }]
+    }
+  }
 
   // Recommended: Hyperdrive pools connections to Supabase close to your users.
   // Create it with: npx wrangler hyperdrive create linkhub-db --connection-string="<Supabase connection string>"
