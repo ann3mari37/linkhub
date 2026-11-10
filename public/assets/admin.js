@@ -57,7 +57,8 @@
                  '<div class="fam-name">' + esc(f.name) + "</div>" +
                  '<div class="fam-meta">' +
                    f.profiles + " member" + (f.profiles === 1 ? "" : "s") + " &middot; " +
-                   f.links + " link" + (f.links === 1 ? "" : "s") + "</div>" +
+                   f.links + " link" + (f.links === 1 ? "" : "s") +
+                   (f.domain ? " &middot; only at <code>" + esc(f.domain) + "</code>" : "") + "</div>" +
                  '<div class="unames">' +
                    f.usernames.map(function (u) {
                      return '<span class="uname">' + esc(u.username) +
@@ -122,6 +123,7 @@
       '<div class="errbar"></div>' +
       '<div class="row2">' +
         '<div class="field"><label>Family name</label><input class="input" data-f="name" maxlength="100" value="' + esc(f.name) + '"></div>' +
+        '<div class="field"><label>Only at this address (optional)</label><input class="input" data-f="domain" maxlength="253" placeholder="link.example.com" autocapitalize="none" spellcheck="false" value="' + esc(f.domain || "") + '"></div>' +
         '<button class="btn btn-primary" data-f="save">Save</button>' +
         '<button class="btn" data-f="cancel">Cancel</button>' +
       "</div>");
@@ -130,7 +132,8 @@
       var btn = this;
       btn.disabled = true;
       call("POST", "admin/api/families/" + f.id, {
-        name: p.querySelector('[data-f="name"]').value
+        name: p.querySelector('[data-f="name"]').value,
+        domain: p.querySelector('[data-f="domain"]').value
       }).then(load).catch(function (e) {
         btn.disabled = false;
         showErr(p.querySelector(".errbar"), e.message);
@@ -177,8 +180,8 @@
   $("addCard").addEventListener("submit", function (e) {
     e.preventDefault();
     clearErr($("addErr"));
-    call("POST", "admin/api/families", { name: $("a-name").value, username: $("a-user").value })
-      .then(function () { $("a-name").value = ""; $("a-user").value = ""; return load(); })
+    call("POST", "admin/api/families", { name: $("a-name").value, username: $("a-user").value, domain: $("a-domain").value })
+      .then(function () { $("a-name").value = ""; $("a-user").value = ""; $("a-domain").value = ""; return load(); })
       .catch(function (e2) { showErr($("addErr"), e2.message); });
   });
 

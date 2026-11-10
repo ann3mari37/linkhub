@@ -13,6 +13,13 @@ create table if not exists families (
   created_at  timestamptz not null default now()
 );
 
+-- Optional: the one address this family signs in at (e.g. admin.malindaperryconsulting.com).
+-- A family with a domain can only sign in there, and that address accepts only that family.
+-- Families without one use the shared addresses (links.jamry.us, links.kittigutierrez.com).
+-- The Worker also adds this column itself on first use, so an existing database needs no manual step.
+alter table families add column if not exists domain text;
+create unique index if not exists families_domain_key on families ((lower(domain))) where domain is not null;
+
 -- Each family can have several usernames; any of them signs in to it.
 create table if not exists family_usernames (
   id          serial primary key,

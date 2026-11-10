@@ -3,8 +3,8 @@
 // signed-in admin.
 //
 //   GET  /admin/api/families                   -> { ok, families: [{ ..., usernames: [{ id, username }] }] }
-//   POST /admin/api/families                   { name, username }  -> { ok, id }   (a family starts with one username)
-//   POST /admin/api/families/:id               { name }            rename
+//   POST /admin/api/families                   { name, username, domain? }  -> { ok, id }   (a family starts with one username)
+//   POST /admin/api/families/:id               { name, domain? }   rename / set the address it is locked to
 //   POST /admin/api/families/:id/delete        { confirm: <the family's name> }
 //   POST /admin/api/families/:id/usernames     { username }        add a username
 //   POST /admin/api/usernames/:id/delete                           remove a username
@@ -19,6 +19,20 @@ function cleanName(v) {
   const name = text(v, 100);
   if (!name) fail('Give the family a name.');
   return name;
+}
+
+// A bare hostname such as admin.malindaperryconsulting.com, or empty for none.
+function cleanDomain(v) {
+  const d = text(v, 253).toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (!d) return null;
+  if (!/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/.test(d)) fail("The domain should look like link.example.com, with no https:// or slashes.");
+  return d;
+}
+
+async function domainFree(db, domain, exceptId) {
+  if (!domain) return;
+  const [row] = await db.q("select name from families where lower(domain) = $1 and id <> $2", [domain, exceptId || 0]);
+  if (row) fail(`${domain} already belongs to ${row.name}.`);
 }
 
 function cleanUsername(v) {
@@ -45,7 +59,7 @@ async function addUsername(db, familyId, username) {
 
 export async function listFamilies(db) {
   const families = await db.q(
-    `select f.id, f.name,
+    `select f.id, f.name, f.domain,
             (select count(*)::int from profiles p where p.family_id = f.id) as profiles,
             (select count(*)::int from links l where l.family_id = f.id) as links,
             coalesce((select json_agg(json_build_object('id', u.id, 'username', u.username) order by lower(u.username))
@@ -63,8 +77,10 @@ export async function listFamilies(db) {
 export async function createFamily(db, body) {
   const name = cleanName(body.name);
   const username = cleanUsername(body.username);
+  const domain = cleanDomain(body.domain);
+  await domainFree(db, domain);
   const id = await db.tx(async (t) => {
-    const [row] = await t.q('insert into families (name) values ($1) returning id', [name]);
+    const [row] = await t.q('insert into families (name, domain) values ($1, $2) returning id', [name, domain]);
     await addUsername(t, row.id, username);
     return row.id;
   });
@@ -73,6 +89,14 @@ export async function createFamily(db, body) {
 
 export async function renameFamily(db, familyId, body) {
   const name = cleanName(body.name);
+  // domain is only changed when the form sends it, so an older admin page can still rename
+  if ('domain' in body) {
+    const domain = cleanDomain(body.domain);
+    await domainFree(db, domain, familyId);
+    const rows = await db.q('update families set name = $2, domain = $3 where id = $1 returning id', [familyId, name, domain]);
+    if (!rows.length) fail('That family no longer exists.');
+    return { ok: true };
+  }
   const rows = await db.q('update families set name = $2 where id = $1 returning id', [familyId, name]);
   if (!rows.length) fail('That family no longer exists.');
   return { ok: true };

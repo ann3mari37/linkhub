@@ -17,10 +17,13 @@
   // Served at links.kittigutierrez.com and links.jamry.us (Cloudflare creates the DNS records
   // and certificates), from the ann3mari37@gmail.com account. Each address has its own sign-in,
   // since cookies belong to one domain.
+  // admin.malindaperryconsulting.com serves only the family whose domain is set to it on /admin,
+  // in MaLinda Perry's theme (src/themes.js).
   "account_id": "1ee0ccf466cef622b87273a6b7d79056",
   "routes": [
     { "pattern": "links.kittigutierrez.com", "custom_domain": true },
-    { "pattern": "links.jamry.us", "custom_domain": true }
+    { "pattern": "links.jamry.us", "custom_domain": true },
+    { "pattern": "admin.malindaperryconsulting.com", "custom_domain": true }
   ],
 
   // TEMPORARY, until jamry.us finishes moving into the gmail account: jamry.us is still

@@ -42,7 +42,8 @@ http.createServer(async (req, res) => {
   try {
     const chunks = []; for await (const c of req) chunks.push(c);
     const body = chunks.length ? Buffer.concat(chunks) : undefined;
-    const request = new Request(`http://localhost:${PORT}${req.url}`, { method: req.method, headers: req.headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : body });
+    // Keeps the address the browser used, so http://malinda.localhost:5181 can try a themed, domain-locked family.
+    const request = new Request(`http://${req.headers.host || `localhost:${PORT}`}${req.url}`, { method: req.method, headers: req.headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : body });
     const response = await worker.fetch(request, env, { waitUntil() {} });
     const headers = {}; response.headers.forEach((v, k) => { headers[k] = v; });
     const setCookie = response.headers.getSetCookie ? response.headers.getSetCookie() : [];

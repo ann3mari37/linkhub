@@ -7,6 +7,7 @@
 import { openDb } from './db.js';
 import * as api from './api.js';
 import * as admin from './admin.js';
+import { themeFor, applyTheme, cspFor, canonicalHost } from './themes.js';
 
 const SESSION_DAYS = 180;
 const DAY = 864e5;
@@ -75,6 +76,25 @@ function crossSite(req, url) {
   return req.headers.get('sec-fetch-site') === 'cross-site';
 }
 
+/* ---------------- schema upkeep ---------------- */
+// families.domain arrived after the first release. Adding it here (once per Worker
+// instance, and a no-op when it exists) means an existing database needs no manual step.
+let schemaReady = false;
+async function ensureSchema(db) {
+  if (schemaReady) return;
+  await db.q('alter table families add column if not exists domain text');
+  await db.q('create unique index if not exists families_domain_key on families ((lower(domain))) where domain is not null');
+  schemaReady = true;
+}
+
+/* ---------------- which families an address serves ---------------- */
+// A family with a domain lives only at that address, and that address serves only it.
+// Families without one share every address that no family has claimed.
+async function familyFitsHost(db, familyDomain, host) {
+  if (familyDomain) return String(familyDomain).toLowerCase() === host;
+  return !(await db.q('select 1 from families where lower(domain) = $1', [host])).length;
+}
+
 /* ---------------- sessions ---------------- */
 // Only a hash of the token is stored. A session belongs to the username it signed in
 // with (removing the username or its family deletes it) and may also be an admin.
@@ -83,7 +103,7 @@ async function readSession(db, req) {
   if (!token) return null;
   const hash = await sha256(token);
   const [row] = await db.q(
-    `select s.token_hash, s.username_id, s.admin, f.id as family_id, f.name as family_name
+    `select s.token_hash, s.username_id, s.admin, f.id as family_id, f.name as family_name, f.domain as family_domain
        from sessions s
        left join family_usernames u on u.id = s.username_id
        left join families f on f.id = u.family_id
@@ -151,8 +171,12 @@ route('POST', '/login', async ({ req, db, url, session }) => {
   const key = `family:${clientIp(req)}`;
   if (await tooManyAttempts(db, key)) return fail(429, TOO_MANY);
   const username = String((await readFields(req)).username || '').trim().toLowerCase();
-  const [row] = username ? await db.q('select id from family_usernames where lower(username) = $1', [username]) : [];
-  if (!row) {
+  const [row] = username ? await db.q(
+    `select u.id, f.domain from family_usernames u join families f on f.id = u.family_id
+      where lower(u.username) = $1`, [username]) : [];
+  // A username that belongs at another address gets the same answer as an unknown one,
+  // so this page never reveals that it exists.
+  if (!row || !(await familyFitsHost(db, row.domain, canonicalHost(url.hostname)))) {
     await noteFailure(db, key);
     return fail(401, 'No family has that username.');
   }
@@ -188,10 +212,11 @@ route('POST', '/admin/api/usernames/:id/delete', async ({ db, p }) => json(200, 
 route('GET', '/', async ({ req, env, url, session }) => {
   if (!session || !session.family_id) return redirect('/login');
   const res = await env.ASSETS.fetch(new Request(new URL('/', url), { headers: req.headers }));
-  const html = (await res.text())
+  const theme = themeFor(url.hostname);
+  const html = applyTheme((await res.text())
     .replace('__FAMILY__', escHtml(session.family_name))
-    .replace('__DELETE_WORD__', escHtml(deleteWordOf(env)));
-  return new Response(html, { status: 200, headers: { ...SECURITY_HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+    .replace('__DELETE_WORD__', escHtml(deleteWordOf(env))), theme);
+  return new Response(html, { status: 200, headers: { ...SECURITY_HEADERS, 'Content-Security-Policy': cspFor(SECURITY_HEADERS['Content-Security-Policy'], theme), 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 });
 
 /* ---------------- entry ---------------- */
@@ -200,7 +225,12 @@ async function handle(req, env, ctx, url, r) {
   let db = {};
   let timer;
   const run = async () => {
+    await ensureSchema(db);
     const session = await readSession(db, req);
+    // A family session only counts at the address that family belongs to.
+    if (session && session.family_id && !(await familyFitsHost(db, session.family_domain, canonicalHost(url.hostname)))) {
+      session.family_id = null;
+    }
     if (r.need === 'family' && !(session && session.family_id)) return fail(401, 'You are signed out. Reload the page to sign in again.');
     if (r.need === 'admin' && !(env.ADMIN_PASSWORD && session && session.admin)) return fail(401, 'Sign in as admin first.');
     const m = url.pathname.match(r.re);
@@ -235,9 +265,15 @@ export default {
     // Everything else is a static file: the sign-in page (/login), the admin page (/admin),
     // styles, scripts and icons. None of them hold any family's data.
     const res = await env.ASSETS.fetch(req);
-    const out = new Response(res.body, res);
+    const theme = themeFor(url.hostname);
+    const isHtml = (res.headers.get('content-type') || '').includes('text/html');
+    const out = isHtml && theme && res.ok ? new Response(applyTheme(await res.text(), theme), res) : new Response(res.body, res);
     Object.entries(SECURITY_HEADERS).forEach(([k, v]) => out.headers.set(k, v));
-    if ((out.headers.get('content-type') || '').includes('text/html')) out.headers.set('Cache-Control', 'no-cache');
+    if (isHtml) {
+      out.headers.set('Cache-Control', 'no-cache');
+      out.headers.set('Content-Security-Policy', cspFor(SECURITY_HEADERS['Content-Security-Policy'], theme));
+      out.headers.delete('Content-Length');
+    }
     return out;
   },
 };
