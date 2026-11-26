@@ -84,6 +84,11 @@ async function ensureSchema(db) {
   if (schemaReady) return;
   await db.q('alter table families add column if not exists domain text');
   await db.q('create unique index if not exists families_domain_key on families ((lower(domain))) where domain is not null');
+  // MaLinda Perry's LinkHub moved from admin. (now the cockpit) to links.malindaperryconsulting.com.
+  // A no-op once moved, or when links. is already taken.
+  await db.q(`update families set domain = 'links.malindaperryconsulting.com'
+    where lower(domain) = 'admin.malindaperryconsulting.com'
+      and not exists (select 1 from families where lower(domain) = 'links.malindaperryconsulting.com')`);
   schemaReady = true;
 }
 
@@ -254,8 +259,25 @@ async function handle(req, env, ctx, url, r) {
   }
 }
 
+// links.malindaperryconsulting.com only: the MaLinda Perry cockpit (admin.malindaperryconsulting.com) may show
+// LinkHub inside its page. Every other address keeps refusing to be framed.
+const COCKPIT_HOST = 'links.malindaperryconsulting.com';
+function forCockpit(url, res) {
+  if (url.hostname !== COCKPIT_HOST) return res;
+  const out = new Response(res.body, res);
+  out.headers.delete('X-Frame-Options');
+  const csp = out.headers.get('Content-Security-Policy');
+  if (csp) out.headers.set('Content-Security-Policy', csp.replace("frame-ancestors 'none'", "frame-ancestors 'self' https://admin.malindaperryconsulting.com"));
+  return out;
+}
+
 export default {
   async fetch(req, env, ctx) {
+    return forCockpit(new URL(req.url), await serve(req, env, ctx));
+  },
+};
+
+async function serve(req, env, ctx) {
     const url = new URL(req.url);
     if (url.pathname === '/healthz') return new Response('ok', { headers: { ...SECURITY_HEADERS, 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } });
     if (url.pathname === '/index.html') return redirect('/');
@@ -275,5 +297,4 @@ export default {
       out.headers.delete('Content-Length');
     }
     return out;
-  },
-};
+}

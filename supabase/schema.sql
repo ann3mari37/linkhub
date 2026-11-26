@@ -13,7 +13,7 @@ create table if not exists families (
   created_at  timestamptz not null default now()
 );
 
--- Optional: the one address this family signs in at (e.g. admin.malindaperryconsulting.com).
+-- Optional: the one address this family signs in at (e.g. links.malindaperryconsulting.com).
 -- A family with a domain can only sign in there, and that address accepts only that family.
 -- Families without one use the shared addresses (links.jamry.us, links.kittigutierrez.com).
 -- The Worker also adds this column itself on first use, so an existing database needs no manual step.

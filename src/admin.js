@@ -21,7 +21,7 @@ function cleanName(v) {
   return name;
 }
 
-// A bare hostname such as admin.malindaperryconsulting.com, or empty for none.
+// A bare hostname such as links.malindaperryconsulting.com, or empty for none.
 function cleanDomain(v) {
   const d = text(v, 253).toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   if (!d) return null;

@@ -8,7 +8,7 @@
 //   tagline   replaces the line under the title
 //   light     true for a light theme (sets color-scheme so form controls match)
 export const THEMES = {
-  'admin.malindaperryconsulting.com': {
+  'links.malindaperryconsulting.com': {
     css: '/assets/themes/malinda.css',
     fonts: 'https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap',
     title: 'Link Library',
@@ -18,7 +18,7 @@ export const THEMES = {
 };
 
 // For trying a theme locally: http://malinda.localhost:5181 uses the MaLinda theme.
-const LOCAL = { 'malinda.localhost': 'admin.malindaperryconsulting.com' };
+const LOCAL = { 'malinda.localhost': 'links.malindaperryconsulting.com' };
 
 // The address a request counts as: real hostnames as-is, local stand-ins mapped to theirs.
 export function canonicalHost(host) {
