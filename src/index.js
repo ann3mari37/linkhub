@@ -18,13 +18,13 @@ const WINDOW_MS = 15 * 60 * 1000;
 
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'same-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   'Strict-Transport-Security': 'max-age=31536000',
   'X-Robots-Tag': 'noindex, nofollow',
   // Link icons come from every site the family adds, so images may load from anywhere.
-  'Content-Security-Policy': "default-src 'self'; img-src * data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  // Only the MaLinda Perry cockpit (admin.malindaperryconsulting.com) may show LinkHub inside its page.
+  'Content-Security-Policy': "default-src 'self'; img-src * data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self' https://admin.malindaperryconsulting.com; base-uri 'self'; form-action 'self'",
 };
 
 /* ---------------- helpers ---------------- */
