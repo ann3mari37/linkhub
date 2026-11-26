@@ -18,13 +18,13 @@ const WINDOW_MS = 15 * 60 * 1000;
 
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'same-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   'Strict-Transport-Security': 'max-age=31536000',
   'X-Robots-Tag': 'noindex, nofollow',
   // Link icons come from every site the family adds, so images may load from anywhere.
-  // Only the MaLinda Perry cockpit (admin.malindaperryconsulting.com) may show LinkHub inside its page.
-  'Content-Security-Policy': "default-src 'self'; img-src * data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self' https://admin.malindaperryconsulting.com; base-uri 'self'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; img-src * data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 };
 
 /* ---------------- helpers ---------------- */
@@ -224,8 +224,25 @@ async function handle(req, env, ctx, url, r) {
   }
 }
 
+// links.malindaperryconsulting.com only: the MaLinda Perry cockpit (admin.malindaperryconsulting.com) may show
+// LinkHub inside its page. Every other address keeps refusing to be framed.
+const COCKPIT_HOST = 'links.malindaperryconsulting.com';
+function forCockpit(url, res) {
+  if (url.hostname !== COCKPIT_HOST) return res;
+  const out = new Response(res.body, res);
+  out.headers.delete('X-Frame-Options');
+  const csp = out.headers.get('Content-Security-Policy');
+  if (csp) out.headers.set('Content-Security-Policy', csp.replace("frame-ancestors 'none'", "frame-ancestors 'self' https://admin.malindaperryconsulting.com"));
+  return out;
+}
+
 export default {
   async fetch(req, env, ctx) {
+    return forCockpit(new URL(req.url), await serve(req, env, ctx));
+  },
+};
+
+async function serve(req, env, ctx) {
     const url = new URL(req.url);
     if (url.pathname === '/healthz') return new Response('ok', { headers: { ...SECURITY_HEADERS, 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } });
     if (url.pathname === '/index.html') return redirect('/');
@@ -239,5 +256,4 @@ export default {
     Object.entries(SECURITY_HEADERS).forEach(([k, v]) => out.headers.set(k, v));
     if ((out.headers.get('content-type') || '').includes('text/html')) out.headers.set('Cache-Control', 'no-cache');
     return out;
-  },
-};
+}
