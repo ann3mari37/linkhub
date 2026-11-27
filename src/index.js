@@ -89,6 +89,8 @@ async function ensureSchema(db) {
   await db.q(`update families set domain = 'links.malindaperryconsulting.com'
     where lower(domain) = 'admin.malindaperryconsulting.com'
       and not exists (select 1 from families where lower(domain) = 'links.malindaperryconsulting.com')`);
+  // One-time passes from the cockpit (see /handoff): each can be used once.
+  await db.q('create table if not exists handoff_uses (nonce text primary key, used_at timestamptz not null default now())');
   schemaReady = true;
 }
 
@@ -186,6 +188,40 @@ route('POST', '/login', async ({ req, db, url, session }) => {
     return fail(401, 'No family has that username.');
   }
   return json(200, { ok: true }, { 'Set-Cookie': await startSession(db, url, session, { usernameId: row.id }) });
+});
+/* ---------------- one-time sign-in from the MaLinda Perry cockpit ---------------- */
+// The cockpit (admin.malindaperryconsulting.com) gets a pass from the Tasks Worker for its signed-in owner:
+// base64url(JSON {u: username, h: host, exp: seconds, n: nonce}).base64url(HMAC-SHA256), signed with the secret
+// HANDOFF_KEY that both Workers share. A pass works once, for two minutes, at the address it names. Without a
+// valid pass this page just shows the normal sign-in, so knowing the address signs no one in.
+const unb64url = (t) => Uint8Array.from(atob(t.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((t.length + 3) % 4)), (c) => c.charCodeAt(0));
+export async function readHandoff(secret, token, host, now = Date.now()) {
+  if (!secret || !token || token.length > 1000) return null;
+  const [body, sig] = String(token).split('.');
+  if (!body || !sig) return null;
+  try {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    if (!(await crypto.subtle.verify('HMAC', key, unb64url(sig), enc.encode(body)))) return null;
+    const p = JSON.parse(new TextDecoder().decode(unb64url(body)));
+    const sec = Math.floor(now / 1000);
+    if (typeof p.u !== 'string' || typeof p.n !== 'string' || p.h !== host || !(p.exp >= sec && p.exp <= sec + 300)) return null;
+    return p;
+  } catch { return null; }
+}
+route('GET', '/handoff', async ({ db, env, url, session }) => {
+  const host = canonicalHost(url.hostname);
+  const pass = await readHandoff(env.HANDOFF_KEY, url.searchParams.get('t'), host);
+  if (!pass) return redirect('/login');
+  await db.q("delete from handoff_uses where used_at < now() - interval '1 day'");
+  const used = await db.q('insert into handoff_uses (nonce) values ($1) on conflict do nothing returning nonce', [pass.n]);
+  if (!used.length) return redirect('/login');
+  const [row] = await db.q(
+    `select u.id, f.domain from family_usernames u join families f on f.id = u.family_id
+      where lower(u.username) = $1`, [pass.u.toLowerCase()]);
+  if (!row || !(await familyFitsHost(db, row.domain, host))) return redirect('/login');
+  return new Response(null, { status: 302, headers: { ...SECURITY_HEADERS, Location: '/', 'Cache-Control': 'no-store',
+    'Set-Cookie': await startSession(db, url, session, { usernameId: row.id }) } });
 });
 route('POST', '/logout', async ({ db, url, session }) => json(200, { ok: true }, await endPart(db, url, session, 'family')));
 
